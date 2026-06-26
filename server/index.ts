@@ -769,11 +769,25 @@ app.post("/api/chat", async (req, res) => {
       }
 
       const books = bizDb.searchBooksHybrid(searchQuery, queryEmbedding, 5);
-      foundBooks = books;  // 存储供后续 SSE book_recommend 事件发送
-      if (books.length > 0) {
-        const sources = books.map(b => b._source).filter((v, i, a) => a.indexOf(v) === i);
+
+      // 精准匹配检测：如果 FTS5 有高分结果（说明用户搜索了具体书名/作者），
+      // 过滤掉仅由 Embedding 语义匹配到的书，避免"搜三体，弹出流浪地球"的情况
+      const hasStrongFts5Match = books.some(
+        (b: any) => (b._source === 'fts5' || b._source === 'both') && b._score > 0.6
+      );
+      if (hasStrongFts5Match) {
+        foundBooks = books.filter((b: any) => b._source !== 'embedding');
+        if (foundBooks.length !== books.length) {
+          console.log(`[Chat] 🔍 检测到精准书名匹配（FTS5高分），过滤掉 ${books.length - foundBooks.length} 条纯语义结果`);
+        }
+      } else {
+        foundBooks = books;
+      }
+
+      if (foundBooks.length > 0) {
+        const sources = foundBooks.map((b: any) => b._source).filter((v: any, i: number, a: any) => a.indexOf(v) === i);
         businessContext += '\n\n## 图书搜索结果（请参考以下数据回答用户）\n';
-        books.forEach((b: any, i: number) => {
+        foundBooks.forEach((b: any, i: number) => {
           const tags = [];
           if (b._source === 'both') tags.push('🔗精准匹配');
           else if (b._source === 'embedding') tags.push('🧠语义匹配');
@@ -781,7 +795,7 @@ app.post("/api/chat", async (req, res) => {
           businessContext += `${i + 1}. 《${b.title}》- ${b.author || '未知'} | 出版社：${b.publisher || '未知'} | 价格：¥${b.price} | 库存：${b.stock} | 分类：${b.category || '未分类'} ${tags.join(' ')}\n`;
         });
         businessContext += '\n---\n**提示**：请直接引用以上图书信息回答用户，告知书名、作者、价格、库存状态。\n';
-        console.log(`[Chat] ✅ 已注入 ${books.length} 条图书搜索结果（来源: ${sources.join(', ')}）`);
+        console.log(`[Chat] ✅ 已注入 ${foundBooks.length} 条图书搜索结果（来源: ${sources.join(', ')}）`);
       }
     }
 
