@@ -718,15 +718,44 @@ app.post("/api/chat", async (req, res) => {
   let businessContext = '';
   let foundBooks: any[] = [];  // 保存书籍搜索结果，供后续 SSE book_recommend 使用
   try {
-    // 1. 书籍搜索：用户消息涉及找书、书名、作者
-    const bookKeywords = ['书', '图书', '书籍', '小说', '作者', '推荐', '找'];
+    // 1. 书籍搜索：用户消息涉及找书、书名、作者、购买意向
+    const bookKeywords = [
+      // 直接书籍词汇
+      '书', '图书', '书籍', '小说', '作者', '作品',
+      // 查找/推荐意图
+      '推荐', '找', '搜索', '查',
+      // 购买/询价意图（最关键：让"三体有卖吗？"这类口语化查询也能触发）
+      '有卖', '卖吗', '有货', '多少钱', '价格', '价钱',
+      '想买', '买书', '买一本',
+      // 询问是否有某物
+      '有没有', '你们有'
+    ];
     const isBookQuery = bookKeywords.some(kw => message.toLowerCase().includes(kw)) ||
-                        /《[^》]+》/.test(message); // 带书名号的
+                        /《[^》]+》/.test(message) || // 带书名号的
+                        /有没有.{1,30}(?:书|卖|货)/.test(message) || // "有没有XX书/卖/货"
+                        /想买.{1,30}/.test(message);  // "想买XX"
     if (isBookQuery) {
-      // 提取搜索词：优先书名号内容，其次用全部消息
+      // 提取搜索词：优先书名号内容，其次去掉常见问句后缀得到干净的搜索词
       let searchQuery = message;
       const m = message.match(/《([^》]+)》/);
-      if (m) searchQuery = m[1];
+      if (m) {
+        searchQuery = m[1];
+      } else {
+        // 去掉常见的口语化问句前缀/后缀，提取核心搜索词
+        searchQuery = searchQuery
+          .replace(/有卖吗[？?]?$/i, '')
+          .replace(/卖吗[？?]?$/i, '')
+          .replace(/有货吗[？?]?$/i, '')
+          .replace(/有吗[？?]?$/i, '')
+          .replace(/多少钱[？?]?$/i, '')
+          .replace(/什么价[格钱][？?]?$/i, '')
+          .replace(/价格[多少]*[？?]?$/i, '')
+          .replace(/价钱[多少]*[？?]?$/i, '')
+          .replace(/有没有[？?]?$/i, '')
+          .replace(/你们有|想买|我要买|帮我找|帮我搜|帮我查/g, '')
+          .replace(/的(?:价格|作品|书)[？?]?$/i, '')
+          .trim();
+      }
 
       // 尝试获取 query embedding（DashScope 配置时使用混合检索）
       let queryEmbedding: Float32Array | undefined;
